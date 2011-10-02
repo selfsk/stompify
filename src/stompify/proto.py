@@ -27,6 +27,26 @@ class StompFrame(object):
     
         self._in_header = True
 
+    def __repr__(self):
+        return repr("type:%s, headers:%s" % (self._frame, self._headers))
+    
+    def toWire(self):
+        """
+        converts object to STOMP frame ready to send on wire
+        """
+        _frame = []
+        _frame.append(self.getType().upper())
+        for k,v in self._headers.items():
+            _frame.append("%s:%s" % (k, v))
+            
+        _frame.append('\n')
+        _frame.append(''.join(self._body))
+        _frame.append('\0')
+        
+        _to_wire = '\n'.join(_frame)
+    
+        return _to_wire
+    
     def parse(self, raw_line):
         if self._in_header:
             if raw_line.find(':') > 0:
@@ -37,18 +57,33 @@ class StompFrame(object):
                 self._in_header = False
         else:
             self._body.append(raw_line)
-            
+      
+    def hasHeader(self, header):
+        return self._headers.has_key(header)
+          
     def setHeader(self, header, value):
         self._headers[header] = value
         
     def getHeader(self, header):
         return self._headers.get(header)
     
+    def setType(self, frame_type):
+        self._frame = frame_type.lower()
+        
     def getType(self):
         return self._frame
     
+    def setBody(self, body):
+        self._body = body
+     
+    def hasBody(self):
+        return len(self._body)
+       
     def getBody(self):
         return self._body
+    
+    def getBodyStr(self):
+        return '\n'.join(self._body)
     
 class StompFrameObserver(object):
     
@@ -69,16 +104,29 @@ class StompFrameObserver(object):
         self._frames.append(frame)
         
     def dispatch(self, proto):
+        #print "frames %s" % self._frames
         self._factory.dispatch(self._frames.pop(0), proto)
         
 class StompProtocol(protocol.Protocol):
     
+    def sendFrame(self, frame_type, body=None, **headers):
+        
+        _frame = StompFrame(frame_type)
+        for k,v in headers.items():
+            _frame.setHeader(k, v)
+            
+        if body:
+            _frame.setBody(body)
+            
+        self.transport.write(_frame.toWire())
+        
     def setBuffer(self, size):
         self._buffer = ''
         self._buffer_size = size
         
     def dataReceived(self, data):
-
+        #print "<--- %r" % repr(data)
+        
         if len(data) > self._buffer_size:
             pass
         elif len(data) + len(self._buffer) > self._buffer_size:
@@ -86,12 +134,14 @@ class StompProtocol(protocol.Protocol):
         
         for c in data:
             if c == '\0':
-                self._parse(self._buffer[:] + '\0')
+                self._parse(self._buffer[:] + '\n\0')
                 self._buffer = ''
             else:
                 self._buffer += c
             
     def _parse(self, _buf):
+        #print "<-- line %r" % repr(_buf)
+         
         for line in _buf.split('\n'):
             self.lineReceived(line)
             
