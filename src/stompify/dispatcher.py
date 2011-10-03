@@ -4,6 +4,7 @@ Created on Sep 30, 2011
 @author: sk
 '''
 
+from stompify import subscription
 class _StompFrameDispatcher(object):
     def dispatch(self, frame, proto):
         
@@ -19,13 +20,13 @@ class StompServer(_StompFrameDispatcher):
     @ivar _version: version protocol 
     """
     
+    _subscription = subscription.SubscriptionManager
     
     _version = [1.1]        
     def __init__(self):
         
-        self._subscriptions = {}
-        self._subsIds = {} # make a match between _id and _dest (to make quick lookup over _subscriptions in case of unsub
-        
+        self.submngr = self._subscription()
+     
     def on_connect(self, frame, proto):
         #print "--> %s" % proto.transport.getPeer()
         _match_vers = []
@@ -50,16 +51,10 @@ class StompServer(_StompFrameDispatcher):
     
         return
     
-    def _clean_by_proto(self, _dest, proto):
-        for _id, items in self._subscriptions[_dest].items():
-            for t in items:
-                if t[1] == proto:
-                    self._subscriptions[_dest][_id].remove(t)
-                    break
+   
 
     def on_disconnect(self, frame, proto):
-        for _dest in self._subscriptions:
-            self._clean_by_proto(_dest, proto)
+        self.submngr.remove_by_proto(proto)
                 
         proto.sendFrame('DISCONNECT')
         proto.transport.loseConnection()
@@ -67,30 +62,19 @@ class StompServer(_StompFrameDispatcher):
     def on_subscribe(self, frame, proto):
         _dest = frame.getHeader('destination')
         _id = frame.getHeader('id')
-        _ack = frame.getHeader('ack')
+        _ack = frame.getHeader('ack') or 'auto'
     
         if not _id or not _dest or not _ack:
             proto.sendFrame('ERROR', body="Missing header")
             proto.transport.loseConnection()
             
-        if self._subscriptions.has_key(_dest):
-            self._subscriptions[_dest][_id].add((_ack, proto))
-        else:
-            self._subscriptions[_dest] = {}
-            self._subscriptions[_dest][_id] = set([(_ack, proto)])
-           
-        if self._subsIds.has_key(_id): 
-            self._subsIds[_id].add(_dest)
-        else:
-            self._subsIds[_id] = set([_dest])
+        self.submngr.add(proto, _id, _dest, _ack)
         
     def on_unsubscribe(self, frame, proto):
         _id = frame.getHeader('id')
         
-        if self._subsIds.has_key(_id):
-            for _dest in self._subsIds[_id]:
-                self._clean_by_proto(_dest, proto)
-            
+        self.submngr.remove(proto, _id)
+             
     def on_send(self, frame, proto):
         _dest = frame.getHeader('destination')
         _body = frame.getBody()
@@ -105,7 +89,7 @@ class StompServer(_StompFrameDispatcher):
             _msg_headers['content-type'] = _content_type
             _msg_headers['content-length'] = _content_length
 
-        for _id, rcpts in self._subscriptions[_dest].items():
+        for _id, rcpts in self.submngr.lookup(_dest).items():
             for r in rcpts:
                 _ack, p = r
                 _msg_headers['subscription'] = _id
