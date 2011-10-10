@@ -107,6 +107,9 @@ class StompFrameObserver(object):
         #print "frames %s" % self._frames
         self._factory.dispatch(self._frames.pop(0), proto)
         
+    def cleanup(self, proto):
+        self._factory.cleanup(proto)
+            
 class StompProtocol(protocol.Protocol):
     
     def sendFrame(self, frame_type, body=None, **headers):
@@ -167,6 +170,9 @@ class StompProtocol(protocol.Protocol):
             else:    
                 frame.parse(line)
                 
+    def connectionLost(self, reason):
+        self.frameObserver.cleanup(self)
+                    
 class StompFactory(protocol.ServerFactory):
     protocol = StompProtocol
     _dispatcher = dispatcher.StompServer
@@ -179,6 +185,9 @@ class StompFactory(protocol.ServerFactory):
         self.dispatcher = self._dispatcher()
         
         print self.dispatcher
+    
+    def cleanup(self, proto):
+        self.dispatcher.cleanup(proto)
         
     def dispatch(self, frame, proto):
         print "Frame: %s" % frame.getType()

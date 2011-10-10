@@ -4,14 +4,27 @@ Created on Sep 30, 2011
 @author: sk
 '''
 
-from stompify import subscription
+from twisted.python import log
+
+from twisted.internet import defer
+from stompify import subscription, transaction
+
+
 class _StompFrameDispatcher(object):
     def dispatch(self, frame, proto):
         
         if hasattr(self, 'on_%s' % frame.getType()):
             m = getattr(self, 'on_%s' % frame.getType())
             m(frame, proto)
-    
+            
+            if frame.getHeader('receipt'):
+                proto.sendFrame('RECEIPT', **{'receipt-id': frame.getHeader('receipt')})
+
+    def cleanup(self, proto):
+        """
+        Handles connection lost, do all necessary cleanup for specified proto (i.e. not ack messages etc.)
+        """
+        
 class StompServer(_StompFrameDispatcher):
     """
     STOMP server dispatcher. Handles server frames 
@@ -21,12 +34,16 @@ class StompServer(_StompFrameDispatcher):
     """
     
     _subscription = subscription.SubscriptionManager
+    _transaction = transaction.TransactionManager
     
     _version = [1.1]        
     def __init__(self):
         
         self.submngr = self._subscription()
-     
+        # ack queue
+        self._ack = {}
+        self.trans = self._transaction()
+        
     def on_connect(self, frame, proto):
         #print "--> %s" % proto.transport.getPeer()
         _match_vers = []
@@ -77,11 +94,15 @@ class StompServer(_StompFrameDispatcher):
              
     def on_send(self, frame, proto):
         _dest = frame.getHeader('destination')
+        _trans = frame.getHeader('transaction')
         _body = frame.getBody()
         
-        _msg_headers = {'destination': _dest,
-                        'message-id': '0xdeadbeaf'}
+        _msg_headers = {'destination': _dest}
+                        
         
+        if _trans:
+            self.trans.add(_trans, frame)
+            
         if frame.hasBody():
             _content_type = frame.getHeader('content-type') or 'text/plain'
             _content_length = frame.getHeader('content-length') or len(frame.getBodyStr())
@@ -91,7 +112,8 @@ class StompServer(_StompFrameDispatcher):
 
         for _id, rcpts in self.submngr.lookup(_dest).items():
             for r in rcpts:
-                _ack, p = r
+                p = r.getProto()
+                _msg_headers['message-id'] = r.messageId()
                 _msg_headers['subscription'] = _id
             
                 if frame.hasBody():
@@ -99,25 +121,55 @@ class StompServer(_StompFrameDispatcher):
                 else:
                     p.sendFrame('MESSAGE', **_msg_headers)
                 
+                if r.getAck() == 'client':
+                    self._ack[_msg_headers['message_id']] = (p, frame)
+                    
     def on_ack(self, frame, proto):
-        pass
-    
+        _message_id = frame.getHeader('message-id')
+        _subId = frame.getHeader('subscription')
+        _trans = frame.getHedaer('transaction')
+        _sub, _frame = self._ack.get(_message_id)
+        
+        if _sub and _subId:
+            if _sub.getId() == _subId: 
+                log.msg("Message(%s) acknowledged" % _message_id)
+                del self._ack[_message_id]
+            
     def on_nack(self, frame, proto):
         pass
     
     def on_begin(self, frame, proto):
-        pass
-    
+        _trans = frame.getHeader('transaction')
+        if _trans:
+            self.trans.begin(_trans)
+            self.trans.add(_trans, frame)
+            
     def on_commit(self, frame, proto):
-        pass
+        _trans = frame.getHeader('transaction')
+        if _trans:
+            self.trans.add(_trans, frame)
+            self.trans.commit(_trans)
     
     def on_abort(self, frame, proto):
-        pass
+        _trans = frame.getHeader('transaction')
+        if _trans:
+            self.trans.abort(_trans)
 
 class StompClient(_StompFrameDispatcher):
     
+    def __init__(self):
+        self._connectDefer = defer.Deferred()
+        self._warm_start = False
+        
+    def _isConnect(self):
+        return self._warm_start
+    
+    def connect(self):
+        self._warm_start = True
+        return self._connectDefer
+    
     def on_connected(self, frame, proto):
-        pass
+        self._connectDefer.callback((frame, proto))
     
     def on_message(self, frame, proto):
         pass
