@@ -102,7 +102,10 @@ class StompFrameObserver(object):
     
     def put(self, frame):
         self._frames.append(frame)
-        
+       
+    def connected(self, proto):
+        self._factory.connected(proto)
+         
     def dispatch(self, proto):
         #print "frames %s" % self._frames
         self._factory.dispatch(self._frames.pop(0), proto)
@@ -112,6 +115,9 @@ class StompFrameObserver(object):
             
 class StompProtocol(protocol.Protocol):
     
+    def connectionMade(self):
+        self.frameObserver.connected(self)
+        
     def sendFrame(self, frame_type, body=None, **headers):
         
         _frame = StompFrame(frame_type)
@@ -173,19 +179,27 @@ class StompProtocol(protocol.Protocol):
     def connectionLost(self, reason):
         self.frameObserver.cleanup(self)
                     
-class StompFactory(protocol.ServerFactory):
+class StompFactory(protocol.Factory):
     protocol = StompProtocol
     _dispatcher = dispatcher.StompServer
-    
-    def setDispatcher(self, dispatcherClass):
+    _start = None
+        
+    def setDispatcher(self, dispatcherClass, start_defer):
         self._dispatcher = dispatcherClass 
+        self._start = start_defer
         
     def startFactory(self):
         #print "dispatcher" % self._dispatcher
         self.dispatcher = self._dispatcher()
+        self.dispatcher.onStart(self._start)
         
         print self.dispatcher
-    
+        
+        #self._defer.callback(self.dispatcher)
+        
+    def connected(self, proto):
+        self.dispatcher.connected(proto, self._start)
+        
     def cleanup(self, proto):
         self.dispatcher.cleanup(proto)
         
@@ -200,3 +214,9 @@ class StompFactory(protocol.ServerFactory):
         proto.frameObserver = StompFrameObserver(self)
         
         return proto
+
+class StomServerFactory(StompFactory, protocol.ServerFactory):
+    pass
+
+class StompClientFactory(StompFactory, protocol.ClientFactory):
+    pass

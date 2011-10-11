@@ -9,6 +9,7 @@ from twisted.python import log
 from twisted.internet import defer
 from stompify import subscription, transaction
 
+import uuid
 
 class _StompFrameDispatcher(object):
     def dispatch(self, frame, proto):
@@ -20,6 +21,12 @@ class _StompFrameDispatcher(object):
             if frame.getHeader('receipt'):
                 proto.sendFrame('RECEIPT', **{'receipt-id': frame.getHeader('receipt')})
 
+    def onStart(self, defer):
+        self._start = defer
+        
+    def connected(self, proto, start_defer):
+        pass
+    
     def cleanup(self, proto):
         """
         Handles connection lost, do all necessary cleanup for specified proto (i.e. not ack messages etc.)
@@ -158,24 +165,50 @@ class StompServer(_StompFrameDispatcher):
 class StompClient(_StompFrameDispatcher):
     
     def __init__(self):
-        self._connectDefer = defer.Deferred()
-        self._warm_start = False
+        self._started = False
+        self._proto = None
         
-    def _isConnect(self):
-        return self._warm_start
-    
-    def connect(self):
-        self._warm_start = True
-        return self._connectDefer
-    
+    def connected(self, proto, start_defer):
+        self._proto = proto
+        proto.sendFrame('CONNECT', version='1.1')
+        self.start_defer = start_defer
+        
     def on_connected(self, frame, proto):
-        self._connectDefer.callback((frame, proto))
-    
+        self._started = True
+        self.start_defer.callback(self)
+        
     def on_message(self, frame, proto):
-        pass
+        print "message %s" % frame
     
     def on_error(self, frame, proto):
+        if not self._started:
+            self.start_defer.errback(self)
+            
+    def on_receipt(self, frame, proto):
         pass
     
-    def on_receipt(self, frame, proto):
-        pass     
+    def subscribe(self, _dest, _ack='auto'):
+        _id = str(uuid.uuid4())
+        self._proto.sendFrame('SUBSCRIBE', ack=_ack, destination=_dest, id=_id)
+    
+    def unsubscribe(self):
+        pass
+    
+    def send(self):
+        pass
+    
+    def ack(self):
+        pass
+    
+    def nack(self):
+        pass
+    
+    def begin(self):
+        pass
+    
+    def commit(self):
+        pass
+    
+    def abort(self):
+        pass
+         

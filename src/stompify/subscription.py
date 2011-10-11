@@ -48,11 +48,17 @@ class SubscriptionManager(object):
         subs = Subscription(proto, _id, _dest, _ack)
         
         if self._subscriptions.has_key(_dest):
-            self._subscriptions[_dest][_id].add(subs)
+            self._subscriptions[_dest]
+            #[_id].add(subs)
         else:
             self._subscriptions[_dest] = {}
-            self._subscriptions[_dest][_id] = set([subs])
+            #self._subscriptions[_dest][_id] = set([subs])
            
+        if self._subscriptions[_dest].has_key(_id):
+            self._subscriptions[_dest][_id].add(subs)
+        else:
+            self._subscriptions[_dest][_id] = set([subs])
+            
         if self._subsIds.has_key(_id): 
             self._subsIds[_id].add(_dest)
         else:
