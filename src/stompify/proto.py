@@ -181,7 +181,6 @@ class StompProtocol(protocol.Protocol):
                     
 class StompFactory(protocol.Factory):
     protocol = StompProtocol
-    _dispatcher = dispatcher.StompServer
     _start = None
         
     def setDispatcher(self, dispatcherClass, start_defer):
@@ -216,7 +215,7 @@ class StompFactory(protocol.Factory):
         return proto
 
 class StomServerFactory(StompFactory, protocol.ServerFactory):
-    pass
+    _dispatcher = dispatcher.StompServer
 
 class StompClientFactory(StompFactory, protocol.ClientFactory):
-    pass
+    _dispatcher = dispatcher.StompClient

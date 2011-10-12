@@ -79,9 +79,7 @@ class StompServer(_StompFrameDispatcher):
 
     def on_disconnect(self, frame, proto):
         self.submngr.remove_by_proto(proto)
-                
-        proto.sendFrame('DISCONNECT')
-        proto.transport.loseConnection()
+        
         
     def on_subscribe(self, frame, proto):
         _dest = frame.getHeader('destination')
@@ -178,7 +176,7 @@ class StompClient(_StompFrameDispatcher):
         self.start_defer.callback(self)
         
     def on_message(self, frame, proto):
-        print "message %s" % frame
+        pass
     
     def on_error(self, frame, proto):
         if not self._started:
@@ -191,24 +189,44 @@ class StompClient(_StompFrameDispatcher):
         _id = str(uuid.uuid4())
         self._proto.sendFrame('SUBSCRIBE', ack=_ack, destination=_dest, id=_id)
     
-    def unsubscribe(self):
-        pass
+        return _id
     
-    def send(self):
-        pass
+    def unsubscribe(self, _id):
+        self._proto.sendFrame('UNSUBSCRIBE', id=_id)
     
-    def ack(self):
-        pass
+    def send(self, body=None, **headers):
+        if body:
+            self._proto.sendFrame('SEND', body=body, **headers)
+        else:
+            self._proto.sendFrame('SEND', **headers)
     
-    def nack(self):
-        pass
+    def _ack_nack(self, _type, _sub, _messageId, _trans=None):
+        _headers = {'subscription': _sub, 'message-id': _messageId}
+        if _trans:
+            _headers['transaction'] = _trans
+            
+        self._proto.sendFrame(type, **_headers)
+    
+    def ack(self, _sub, _messageId, _trans):
+        self._ack_nack('ACK', _sub, _messageId, _trans)
+        
+    def nack(self, _sub, _messageId, _trans):
+        self._ack_nack('NACK', _sub, _messageId, _trans)
     
     def begin(self):
-        pass
+        _trans = str(uuid.uuid4())
+        self._proto.sendFrame('BEGIN', transaction=_trans)
     
-    def commit(self):
-        pass
+        return _trans
     
-    def abort(self):
-        pass
+    def commit(self, _trans):
+        self._proto.sendFrame('COMMIT', transaction=_trans)
+    
+    def abort(self, _trans):
+        self._proto.sendFrame('ABORT', transaction=_trans)
          
+    def disconnect(self, _receipt=None):
+        if _receipt:
+            self._proto.sendFrame('DISCONNECT', receipt=_receipt)
+        else:
+            self._proto.sendFrame('DISCONNECT')

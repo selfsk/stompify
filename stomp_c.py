@@ -1,5 +1,5 @@
-from twisted.application import service
-from stompify import app, dispatcher
+from twisted.internet import reactor, defer
+from stompify import proto, dispatcher
 
 class MyDispatcher(dispatcher.StompClient):
     def on_message(self, frame, proto):
@@ -19,11 +19,12 @@ def _started(dispatcher):
    dispatcher.subscribe('/queue/temp')
    dispatcher.send(body="hello world", destination='/queue/temp')
      
-application = service.Application('stomp')
-stomp = app.StompClientService()
-stomp.setFrameDispatcher(MyDispatcher)
 
-stomp.start().addCallback(_started)
+start_defer = defer.Deferred()
+f = proto.StompClientFactory()
+f.setDispatcher(MyDispatcher, start_defer)
 
-stomp.setServiceParent(application)
+start_defer.addCallback(_started)
+reactor.connectTCP('localhost', 61613, f)
+reactor.run()
 
